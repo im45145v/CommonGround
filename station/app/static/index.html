@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CommonGround</title>
+<style>
+:root{--g:#2f7d4f;--bg:#f3f8f1}
+body{font-family:system-ui,sans-serif;margin:0;background:var(--bg);color:#1b2b20}
+header{background:var(--g);color:#fff;padding:12px 16px}
+header small{display:block;opacity:.85}
+nav{display:flex;overflow-x:auto;background:#fff;border-bottom:1px solid #ccd}
+nav button{flex:1;padding:12px;border:0;background:none;font-size:15px}
+nav button.on{border-bottom:3px solid var(--g);font-weight:600}
+main{padding:12px;max-width:640px;margin:auto}
+.card{background:#fff;border-radius:10px;padding:12px;margin:10px 0;box-shadow:0 1px 3px #0002}
+button.p{background:var(--g);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:15px}
+input{padding:10px;font-size:15px;border:1px solid #aaa;border-radius:8px;width:60%}
+.hid{display:none} audio{width:100%} pre{white-space:pre-wrap}
+</style></head><body>
+<header><b>🌿 CommonGround</b><small id="st">connecting…</small></header>
+<div id="join" class="card" style="margin:12px">
+ <p>Pick a pseudonym to join this station. No account or location needed.</p>
+ <input id="nick" maxlength="24" placeholder="Nickname"> <button class="p" onclick="join()">Join</button>
+</div>
+<div id="app" class="hid">
+<nav id="tabs"></nav><main id="view"></main></div>
+<script>
+const $=id=>document.getElementById(id);
+let token=localStorage.cg_token||"", me=localStorage.cg_me||"", tab="quests", ws=null, runs={};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(path,method="GET",body){
+  const r=await fetch(path,{method,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},
+    body:body?JSON.stringify(body):undefined});
+  const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.detail||r.status); return j;}
+async function join(){
+  const j=await api("/api/session","POST",{nickname:$("nick").value}).catch(e=>alert(e.message)); if(!j) return;
+  token=j.token; me=j.user_id; localStorage.cg_token=token; localStorage.cg_me=me; boot();}
+const TABS={quests:"Quests",wallet:"Battery",trivia:"Trivia",talk:"Talk",library:"Library",radio:"Radio"};
+async function boot(){
+  const s=await fetch("/api/status").then(r=>r.json()); $("st").textContent=s.station+" · works offline · quests "+s.quest_seconds+"s"+(s.demo_mode?" (demo)":"");
+  if(!token) return;
+  const w=await fetch("/api/wallet",{headers:{Authorization:"Bearer "+token}}); if(!w.ok){token="";localStorage.removeItem("cg_token");return;}
+  $("join").classList.add("hid"); $("app").classList.remove("hid");
+  $("tabs").innerHTML=Object.entries(TABS).map(([k,v])=>`<button id="t_${k}" onclick="show('${k}')">${v}</button>`).join(""); show(tab);}
+function show(t){tab=t; if(ws&&t!="trivia"){ws.close();ws=null}
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.id=="t_"+t)); views[t]().catch(e=>$("view").innerHTML=esc(e.message));}
+const views={
+async quests(){const q=await api("/api/quests");
+  $("view").innerHTML=q.map(x=>`<div class="card"><b>${esc(x.title)}</b> <small>+${x.reward} credits · ${x.duration_seconds}s${x.source!="builtin"?" · AI":""}</small>
+  <p>${esc(x.description)}</p><div id="r${x.id}">${runs[x.id]?runInfo(x.id):`<input id="j${x.id}" placeholder="friend's code (optional)" style="width:50%"> <button class="p" onclick="startQ(${x.id})">Start</button>`}</div></div>`).join("")+
+  `<button class="p" onclick="aiQuest()">✨ Generate a new quest</button>`;},
+async wallet(){const w=await api("/api/wallet");
+  $("view").innerHTML=`<div class="card"><h2>🔋 ${w.balance} credits</h2><small>${w.daily_remaining} left to earn today</small></div>`+
+  w.history.map(h=>`<div class="card">+${h.amount} · ${esc(h.note)} <small>${new Date(h.created_at*1000).toLocaleString()}</small></div>`).join("")+
+  `<div class="card"><small>The Android companion pairs with this station and syncs signed receipts.</small></div>`;},
+async trivia(){ $("view").innerHTML=`<div class="card"><input id="room" value="garden" maxlength="32"> <button class="p" onclick="joinRoom()">Join room</button></div><div id="game"></div>`;},
+async talk(){const m=await api("/api/talk");
+  $("view").innerHTML=`<div class="card"><button class="p" onclick="aiDisc()">✨ New AI question</button></div>`+
+  m.map(x=>`<div class="card"><b>${esc(x.nickname)}</b>: ${esc(x.body)} ${x.user_id==me||x.user_id=="station"?"":`<br><small><a href="#" onclick="rep(${x.id});return false">report</a> · <a href="#" onclick="blk('${x.user_id}');return false">block</a></small>`}</div>`).join("")+
+  `<div class="card"><input id="msg" maxlength="500"> <button class="p" onclick="send()">Send</button></div>`;},
+async library(){const [m,b,c]=await Promise.all(["music","books","cache"].map(s=>fetch("/api/library/"+s).then(r=>r.json())));
+  $("view").innerHTML="<h3>Music</h3>"+m.map(f=>`<div class="card">${esc(f.title)}<audio controls preload="none" src="/api/library/music/${encodeURIComponent(f.name)}"></audio></div>`).join("")+
+  "<h3>Books</h3>"+b.map(f=>`<div class="card"><a href="#" onclick="readBook('${encodeURIComponent(f.name)}');return false">${esc(f.title)}</a></div>`).join("")+
+  "<h3>Cached audio</h3>"+c.map(f=>`<div class="card">${esc(f.title)}<audio controls preload="none" src="/api/library/cache/${encodeURIComponent(f.name)}"></audio></div>`).join("")+`<div id="book"></div>`;},
+async radio(){$("view").innerHTML=`<div class="card"><button class="p" onclick="radio()">📻 Commons Radio announcement</button><div id="rad"></div></div>`;}};
+function runInfo(id){const r=runs[id];return `Code to share: <b>${r.code}</b> <span id="c${id}"></span> <button class="p" onclick="finish(${id})">Complete</button>`}
+async function startQ(id){const jc=$("j"+id).value;try{runs[id]=await api(`/api/quests/${id}/start`,"POST",{join_code:jc||null});show("quests")}catch(e){alert(e.message)}}
+async function finish(id){try{const r=await api(`/api/runs/${runs[id].run_id}/complete`,"POST");delete runs[id];
+  alert(r.credits?`+${r.credits} credits!`+(r.shared_bonus?" (shared bonus)":""):r.message);show("wallet")}catch(e){alert(e.message)}}
+async function aiQuest(){await api("/api/ai/quest","POST");show("quests")}
+async function aiDisc(){await api("/api/ai/discussion","POST");show("talk")}
+async function send(){await api("/api/talk","POST",{body:$("msg").value}).catch(e=>alert(e.message));show("talk")}
+async function rep(id){await api("/api/report","POST",{message_id:id});alert("Reported, thanks.")}
+async function blk(u){await api("/api/block","POST",{user_id:u});show("talk")}
+async function readBook(n){$("book").innerHTML="<pre class='card'>"+esc(await fetch("/api/library/books/"+n).then(r=>r.text()))+"</pre>"}
+async function radio(){const r=await api("/api/radio","POST");$("rad").innerHTML=`<p><b>${esc(r.headline)}</b><br>${esc(r.script)}</p><small>source: ${r.source}</small>`+(r.audio?`<audio controls src="/api/library/cache/${r.audio}"></audio>`:"")}
+function joinRoom(){ if(ws)ws.close(); ws=new WebSocket((location.protocol=="https:"?"wss://":"ws://")+location.host+"/ws/trivia/"+encodeURIComponent($("room").value)+"?token="+encodeURIComponent(token));
+  ws.onmessage=e=>{const m=JSON.parse(e.data),g=$("game");const sc=s=>"<ol>"+s.map(x=>`<li>${esc(x.nickname)}: ${x.score}</li>`).join("")+"</ol>";
+   if(m.type=="players")g.innerHTML=`<div class="card">Lobby (${m.state})${sc(m.scores)}<button class="p" onclick="ws.send(JSON.stringify({type:'start'}))">Start game</button></div>`;
+   if(m.type=="question")g.innerHTML=`<div class="card"><b>${m.number}/${m.total}: ${esc(m.q)}</b>`+m.options.map((o,i)=>`<p><button class="p" onclick="ws.send(JSON.stringify({type:'answer',choice:${i}}))">${esc(o)}</button></p>`).join("")+"</div>";
+   if(m.type=="result")g.innerHTML=`<div class="card">Scores${sc(m.scores)}</div>`;
+   if(m.type=="finished")g.innerHTML=`<div class="card"><b>Game over</b>${sc(m.scores)}</div>`;};}
+boot();
+</script></body></html>
