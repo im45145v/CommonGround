@@ -29,6 +29,11 @@ class StartIn(BaseModel):
     join_code: str | None = None
 
 
+class ClaimIn(BaseModel):
+    code: str = Field(max_length=12)
+    label: str = Field(default="android", max_length=40)
+
+
 class ReceiptIn(BaseModel):
     receipt: str
 
@@ -88,6 +93,23 @@ def create_app(settings: Settings | None = None, provider=None, clock=None) -> F
         """Gives the Android companion the PUBLIC key (never the private key) to verify receipts offline."""
         return {"station": settings.station_name, "public_key": svc.public_key,
                 "key_algorithm": "ECDSA-P256-SHA256", "user_id": user["id"]}
+
+    @app.post("/api/pair/code")
+    def pair_code(user=Depends(current_user)):
+        """Web app asks for a one-time code to link the Android companion to this identity."""
+        return svc.create_pair_code(user)
+
+    @app.post("/api/pair/claim")
+    def pair_claim(body: ClaimIn):
+        """Android app exchanges the code for its own device token plus the PUBLIC receipt key."""
+        out = svc.claim_pair_code(body.code, body.label)
+        return out | {"station": settings.station_name, "public_key": svc.public_key,
+                      "key_algorithm": "ECDSA-P256-SHA256"}
+
+    @app.get("/api/receipts")
+    def my_receipts(user=Depends(current_user)):
+        """Signed receipts not yet redeemed by a device."""
+        return {"receipts": svc.pending_receipts(user["id"])}
 
     # ---- quests / wallet -------------------------------------------------
     @app.get("/api/quests")

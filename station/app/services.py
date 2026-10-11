@@ -1,6 +1,7 @@
 """Users, quest lifecycle, credit ledger and receipts. All reward decisions happen here."""
 import hashlib
 import secrets
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -31,6 +32,9 @@ def _day(ts: float) -> str:
 class Services:
     def __init__(self, db: Database, settings: Settings, clock=time.time):
         self.db, self.settings, self.now = db, settings, clock
+        self._pair_lock = threading.Lock()
+        self._pair_codes: dict[str, tuple[str, float]] = {}
+        self._claim_fails: list[float] = []
         if not db.one("SELECT 1 FROM quests LIMIT 1"):
             for t, d, r in SEED_QUESTS:
                 db.execute("INSERT INTO quests(title,description,reward) VALUES (?,?,?)", (t, d, r))
@@ -55,7 +59,45 @@ class Services:
         return {"user_id": uid, "nickname": nickname, "token": token}
 
     def user_by_token(self, token: str):
-        return self.db.one("SELECT * FROM users WHERE token_hash=?", (self._hash(token or ""),))
+        h = self._hash(token or "")
+        return (self.db.one("SELECT * FROM users WHERE token_hash=?", (h,)) or
+                self.db.one("SELECT u.* FROM users u JOIN device_tokens d ON d.user_id=u.id WHERE d.token_hash=?", (h,)))
+
+    PAIR_TTL = 300
+    CLAIM_MAX_FAILS, CLAIM_WINDOW = 10, 60
+
+    def create_pair_code(self, user):
+        """Short-lived single-use code shown in the web app and typed into the Android app."""
+        now = self.now()
+        with self._pair_lock:
+            self._pair_codes = {c: v for c, v in self._pair_codes.items() if v[1] > now}
+            code = f"{secrets.randbelow(10**6):06d}"
+            while code in self._pair_codes:
+                code = f"{secrets.randbelow(10**6):06d}"
+            self._pair_codes[code] = (user["id"], now + self.PAIR_TTL)
+        return {"code": code, "expires_in": self.PAIR_TTL}
+
+    def claim_pair_code(self, code: str, label: str):
+        now = self.now()
+        with self._pair_lock:
+            # Global lockout (not per-client) to make guessing 6-digit codes impractical on a shared LAN.
+            self._claim_fails = [t for t in self._claim_fails if t > now - self.CLAIM_WINDOW]
+            if len(self._claim_fails) >= self.CLAIM_MAX_FAILS:
+                raise ServiceError(429, "too many failed pairing attempts, wait a minute")
+            entry = self._pair_codes.pop((code or "").strip(), None)
+            if not entry or entry[1] < now:
+                self._claim_fails.append(now)
+                raise ServiceError(422, "invalid or expired pairing code")
+        token = secrets.token_urlsafe(24)
+        self.db.execute("INSERT INTO device_tokens VALUES (?,?,?,?)",
+                        (self._hash(token), entry[0], label[:40] or "device", int(self.now())))
+        user = self.db.one("SELECT * FROM users WHERE id=?", (entry[0],))
+        return {"token": token, "user_id": user["id"], "nickname": user["nickname"]}
+
+    def pending_receipts(self, user_id: str):
+        rows = self.db.query("SELECT token FROM receipts WHERE user_id=? AND redeemed_at IS NULL AND token IS NOT NULL "
+                             "ORDER BY issued_at", (user_id,))
+        return [r["token"] for r in rows]
 
     # ---- quests ----------------------------------------------------------
     def list_quests(self):
@@ -124,6 +166,7 @@ class Services:
                             (rid, cur.lastrowid, user["id"], granted, int(now)))
             payload = {"v": 1, "id": rid, "user": user["id"], "amount": granted, "quest": quest["id"], "iat": int(now)}
             result["receipt"] = receipts.sign(self.key, payload)
+            self.db.execute("UPDATE receipts SET token=? WHERE id=?", (result["receipt"], rid))
             return result
 
     def daily_remaining(self, user_id: str, now: float | None = None) -> int:

@@ -51,7 +51,7 @@ async quests(){const q=await api("/api/quests");
 async wallet(){const w=await api("/api/wallet");
   $("view").innerHTML=`<div class="card"><h2>🔋 ${w.balance} credits</h2><small>${w.daily_remaining} left to earn today</small></div>`+
   w.history.map(h=>`<div class="card">+${h.amount} · ${esc(h.note)} <small>${new Date(h.created_at*1000).toLocaleString()}</small></div>`).join("")+
-  `<div class="card"><small>The Android companion pairs with this station and syncs signed receipts.</small></div>`;},
+  `<div class="card"><button class="p" onclick="pairCode()">Pair Android app</button><div id="pc"></div><small>Shows a one-time code (valid 5 min) to type into the CommonGround Android app.</small></div>`;},
 async trivia(){ $("view").innerHTML=`<div class="card"><input id="room" value="garden" maxlength="32"> <button class="p" onclick="joinRoom()">Join room</button></div><div id="game"></div>`;},
 async talk(){const m=await api("/api/talk");
   $("view").innerHTML=`<div class="card"><button class="p" onclick="aiDisc()">✨ New AI question</button></div>`+
@@ -66,6 +66,7 @@ function runInfo(id){const r=runs[id];return `Code to share: <b>${r.code}</b> <s
 async function startQ(id){const jc=$("j"+id).value;try{runs[id]=await api(`/api/quests/${id}/start`,"POST",{join_code:jc||null});show("quests")}catch(e){alert(e.message)}}
 async function finish(id){try{const r=await api(`/api/runs/${runs[id].run_id}/complete`,"POST");delete runs[id];
   alert(r.credits?`+${r.credits} credits!`+(r.shared_bonus?" (shared bonus)":""):r.message);show("wallet")}catch(e){alert(e.message)}}
+async function pairCode(){const r=await api('/api/pair/code','POST');$('pc').innerHTML=`<h2>${r.code}</h2>`}
 async function aiQuest(){await api("/api/ai/quest","POST");show("quests")}
 async function aiDisc(){await api("/api/ai/discussion","POST");show("talk")}
 async function send(){await api("/api/talk","POST",{body:$("msg").value}).catch(e=>alert(e.message));show("talk")}

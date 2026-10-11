@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE TABLE IF NOT EXISTS receipts (
   id TEXT PRIMARY KEY, ledger_id INTEGER NOT NULL REFERENCES ledger(id), user_id TEXT NOT NULL,
   amount INTEGER NOT NULL, issued_at INTEGER NOT NULL, redeemed_at INTEGER);
+CREATE TABLE IF NOT EXISTS device_tokens (
+  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), label TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, nickname TEXT NOT NULL,
   body TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
@@ -41,6 +43,9 @@ class Database:
         self.lock = threading.RLock()
         with self.lock:
             self.conn.executescript(SCHEMA)
+            cols = [r["name"] for r in self.conn.execute("PRAGMA table_info(receipts)")]
+            if "token" not in cols:  # migration for databases created before receipts were stored
+                self.conn.execute("ALTER TABLE receipts ADD COLUMN token TEXT")
 
     def query(self, sql, params=()):
         with self.lock:

@@ -5,8 +5,10 @@ station, complete short outdoor quests, and earn "Social Battery" credits via si
 companion is meant to spend as a voluntary recreational screen-time budget.
 
 > **Status: honest prototype.** The station (backend + mobile web app) is implemented and tested on a development
-> machine. The Android companion, on-device UNO Q deployment/testing, Gemma on real hardware and ElevenLabs
-> integration have **not** been built/verified yet — see [Known limitations](#known-limitations).
+> machine (24 automated tests). The Android companion (`android/`) is written and its core logic is unit-tested on the
+> JVM, but the app has **not yet been built into an APK or run on a physical phone** (see [docs/ANDROID.md](docs/ANDROID.md)).
+> The web UI has not been tested on a real phone ([checklist](docs/PHONE_BROWSER_CHECKLIST.md)). On-device UNO Q
+> deployment, Gemma on real hardware and live ElevenLabs are out of scope so far — see [Known limitations](#known-limitations).
 
 ## What works today (station/)
 
@@ -14,7 +16,7 @@ companion is meant to spend as a voluntary recreational screen-time budget.
 |---|---|
 | Station + mobile web app | FastAPI serves a responsive single-page UI (`station/app/static/index.html`); no internet needed |
 | Quests & credits | Server-timed quest runs (demo 10 s, normal `CG_QUEST_SECONDS`), server-decided rewards, daily limit, shared-activity bonus via join code, idempotent ledger (`UNIQUE(kind, ref)`) |
-| Receipts | HMAC-SHA256 signed, unique, single-redeem receipts (`/api/receipts/verify`, `/redeem`); phone can verify offline with the key from `/api/pair` |
+| Receipts | **ECDSA P-256 / SHA-256** signed, unique, single-redeem receipts. The private key (PEM, mode 0600, `CG_KEY_PATH`, default `receipt_key.pem` next to the DB) stays on the station and survives restarts. Phones get only the public key (`/api/pair`, `/api/pair/claim`) and verify offline; they cannot mint receipts |
 | Library | Music, public-domain books (Aesop selection), cached audio under `station/media/` (separate from code; point `CG_MEDIA_DIR` at an SSD) |
 | Multiplayer | WebSocket trivia (`/ws/trivia/{room}`), multiple rooms/players |
 | Community | Pseudonymous sessions, Talk Circle, report (auto-hide at 3 reports) and block |
@@ -31,7 +33,7 @@ Phone browser ──HTTP/WS──► FastAPI (station/app/main.py)
                              ├─ library.py   media folders
                              ├─ ai.py        provider interface + fallback
                              └─ hardware.py  LED display interface
-Android companion ──► /api/pair, receipts (verify offline with HMAC key)   [not implemented]
+Android companion (android/) ──► /api/pair/claim, /api/receipts; verifies receipts offline with the ECDSA public key
 ```
 
 ## Run on a development machine
@@ -46,7 +48,7 @@ uvicorn app.main:app_factory --factory --host 0.0.0.0 --port 8000
 Open `http://<your-ip>:8000` on a phone on the same network.
 
 Settings (env vars): `CG_DEMO_MODE`, `CG_DEMO_QUEST_SECONDS`, `CG_QUEST_SECONDS`, `CG_DAILY_LIMIT`, `CG_SHARED_BONUS`,
-`CG_SECRET` (receipt key; otherwise generated and stored in the DB), `CG_DB_PATH`, `CG_MEDIA_DIR`, `CG_AI_URL`,
+`CG_KEY_PATH` (receipt signing key file; keep it private and back it up), `CG_DB_PATH`, `CG_MEDIA_DIR`, `CG_AI_URL`,
 `CG_AI_MODEL`, `CG_AI_ENABLED`, `CG_AI_TIMEOUT`, `CG_LED_COMMAND`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`.
 
 ## Deploy to the UNO Q (untested)
@@ -58,11 +60,12 @@ check RAM and latency first, and leave `CG_AI_ENABLED=false` if it is not reliab
 
 ## Known limitations
 
-- **Android companion not implemented** (wallet, receipt sync, usage access, voluntary app gate). Receipt format
-  and `/api/pair` are designed for it; no Kotlin code exists yet.
-- Receipts use a **symmetric** HMAC key shared with paired phones; a compromised phone could mint receipts. Asymmetric
-  signatures (e.g. Ed25519) would be the next step. Server-side `/redeem` prevents double redemption online; offline
-  dedupe is the client's job (by receipt id).
+- **Android companion is untested on a device** (UI, usage tracking, permission flows, gate). Only the receipt,
+  wallet and budget logic has JVM unit tests. Enforcement is an opt-in soft gate, not a lock; see docs/ANDROID.md.
+- Losing `receipt_key.pem` means a new key is generated and previously issued receipts no longer verify on phones that
+  paired earlier (re-pair them). Anyone with a copy of the file can mint receipts.
+- Offline wallets can't know if a receipt was already redeemed on another phone until they sync; the station refuses a
+  second redemption, and the app then doesn't credit it.
 - The quest timer proves elapsed time only; there is no proof of being outdoors (deliberately no location tracking).
 - Session tokens are bearer tokens stored in the browser; no rate limiting.
 - Not tested on UNO Q hardware; Gemma local inference, LED matrix output and ElevenLabs were not exercised.
@@ -70,3 +73,14 @@ check RAM and latency first, and leave `CG_AI_ENABLED=false` if it is not reliab
 - Credit farming with multiple anonymous sessions (including self-joined shared quests) is not prevented; the daily
   limit is per pseudonym. Rate limiting or per-device limits are future work. `/api/receipts/redeem` is unauthenticated
   (the signed receipt itself is the bearer credential).
+
+## API changes (milestone 2)
+- `GET /api/pair` now returns `public_key` (base64 X.509 DER, ECDSA P-256) and `key_algorithm`; `receipt_key` was removed.
+- New: `POST /api/pair/code` (authenticated, web app; one-time 6-digit code, 5 min), `POST /api/pair/claim`
+  (`{code,label}` → device token, `user_id`, `public_key`), `GET /api/receipts` (device/web token; unredeemed receipts).
+- Receipt format: `base64url(JSON).base64url(DER ECDSA signature)`; payload `{v,id,user,amount,quest,iat}`.
+- Rate limiting does not stop one person making several anonymous identities; that remains an open problem.
+
+## Android and manual testing
+See [docs/ANDROID.md](docs/ANDROID.md) (build, install, offline end-to-end steps) and
+[docs/PHONE_BROWSER_CHECKLIST.md](docs/PHONE_BROWSER_CHECKLIST.md).

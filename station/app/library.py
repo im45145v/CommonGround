@@ -19,8 +19,10 @@ class Library:
 
     def path(self, section: str, name: str):
         """Return a file only if it is listed directly inside the section folder (no path traversal)."""
+        if section not in SECTIONS:
+            return None
         d = self.root / section
-        if section not in SECTIONS or not d.is_dir():
+        if not d.is_dir():
             return None
         for p in d.iterdir():
             if p.name == name and p.is_file() and p.suffix.lower() in SECTIONS[section]:
