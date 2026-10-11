@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The station is a plain-HTTP server on a local network with no internet/TLS certificate.
+     Cleartext is therefore allowed. Receipts are authenticated by ECDSA signatures, not by transport. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
