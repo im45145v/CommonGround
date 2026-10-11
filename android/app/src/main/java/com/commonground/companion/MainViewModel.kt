@@ -27,7 +27,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         val c = getApplication<Application>()
         hasUsagePermission = Usage.hasPermission(c)
-        val used = Usage.minutesToday(c, settings.selectedApps)
+        if (!hasUsagePermission && settings.gateEnabled) { // permission revoked while enforcement was on
+            settings.gateEnabled = false
+            MonitorService.stop(c)
+            message = "Usage access was revoked: enforcement was switched off. Tracking is unavailable until you grant it again."
+        }
+        if (hasUsagePermission && settings.gateEnabled) try { MonitorService.start(c) } catch (e: Exception) {} // restart if the OS killed it
+        val used = Usage.minutesToday(c, Protection.gateable(settings.selectedApps, Usage.protectedPackages(c)))
         val today = Settings.today()
         if (used != null) wallet.recordUsage(today, used)
         status = Budget.compute(wallet.earnedMinutes, wallet.usedBefore(today), wallet.usedMinutes(today), settings.dailyCapMinutes)
@@ -51,7 +57,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun sync() = io("Syncing…") {
         if (!wallet.isPaired) return@io "Pair with a station first."
         val r = Sync.run(wallet, StationClient(wallet.stationUrl))
-        "Synced: ${r.added} new receipt(s), ${r.rejected} rejected"
+        "Synced: ${r.added} new receipt(s), ${r.redeemed} redeemed, ${r.rejected} rejected"
     }
 
     fun addManual(token: String) {
@@ -59,9 +65,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             AddResult.Added -> "Receipt verified and added (will be redeemed on the station at next sync)."
             AddResult.Duplicate -> "Receipt already in your wallet."
             AddResult.WrongUser -> "Receipt belongs to a different participant."
+            AddResult.WrongStation -> "Receipt was issued by a different station."
+            AddResult.Expired -> "Receipt has expired."
             AddResult.Invalid -> if (wallet.isPaired) "Invalid receipt signature." else "Pair with a station first."
         }
         refresh()
+    }
+
+    fun unpair() = io("Unpairing…") {
+        val url = wallet.stationUrl; val token = wallet.deviceToken
+        wallet.unpair() // always forget locally first
+        val note = try { StationClient(url).revokeSelf(token); "" } catch (e: Exception) { " (station not reachable; revoke this device there later)" }
+        "Unpaired. Earned minutes are kept.$note"
     }
 
     fun toggleApp(pkg: String) { settings.selectedApps = settings.selectedApps.let { if (pkg in it) it - pkg else it + pkg }; refresh() }

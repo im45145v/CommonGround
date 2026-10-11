@@ -10,6 +10,8 @@ sealed class AddResult {
     object Added : AddResult()
     object Duplicate : AddResult()
     object WrongUser : AddResult()
+    object WrongStation : AddResult()
+    object Expired : AddResult()
     object Invalid : AddResult()
 }
 
@@ -17,7 +19,7 @@ sealed class AddResult {
  * The Social Battery wallet. Persisted as a JSON file so it works with no network at all.
  * Receipts are only added after signature verification and are de-duplicated by receipt id.
  */
-class Wallet(private val file: File) {
+class Wallet(private val file: File, private val clock: () -> Long = { System.currentTimeMillis() / 1000 }) {
     var stationName: String = ""; private set
     var stationUrl: String = ""; private set
     var publicKey: String = ""; private set
@@ -52,8 +54,10 @@ class Wallet(private val file: File) {
     fun addReceipt(token: String, redeemed: Boolean = false): AddResult {
         if (publicKey.isEmpty()) return AddResult.Invalid
         val r = ReceiptVerifier.verify(publicKey, token) ?: return AddResult.Invalid
+        if (r.audience != ReceiptVerifier.stationId(publicKey)) return AddResult.WrongStation
         if (userId.isNotEmpty() && r.userId != userId) return AddResult.WrongUser
         if (entries.containsKey(r.id)) return AddResult.Duplicate
+        if (r.expiresAt < clock()) return AddResult.Expired  // checked only when adding; earned minutes never expire here
         entries[r.id] = WalletEntry(r, redeemed, token.trim())
         save()
         return AddResult.Added
@@ -82,7 +86,8 @@ class Wallet(private val file: File) {
         j.put("entries", JSONArray().also { arr ->
             entries.values.forEach { e ->
                 arr.put(JSONObject().put("id", e.receipt.id).put("user", e.receipt.userId).put("amount", e.receipt.amount)
-                    .put("quest", e.receipt.quest).put("iat", e.receipt.issuedAt).put("redeemed", e.redeemedOnStation).put("token", e.token))
+                    .put("quest", e.receipt.quest).put("iat", e.receipt.issuedAt)
+                    .put("aud", e.receipt.audience).put("exp", e.receipt.expiresAt).put("redeemed", e.redeemedOnStation).put("token", e.token))
             }
         })
         j.put("usage", JSONObject().also { u -> usage.forEach { (d, m) -> u.put(d, m) } })
@@ -103,7 +108,8 @@ class Wallet(private val file: File) {
             for (i in 0 until arr.length()) {
                 val e = arr.getJSONObject(i)
                 entries[e.getString("id")] = WalletEntry(
-                    Receipt(e.getString("id"), e.getString("user"), e.getInt("amount"), e.optInt("quest"), e.getLong("iat")),
+                    Receipt(e.getString("id"), e.getString("user"), e.getInt("amount"), e.optInt("quest"), e.getLong("iat"),
+                        e.optString("aud"), e.optLong("exp")),
                     e.optBoolean("redeemed"), e.optString("token"))
             }
             val u = j.optJSONObject("usage")

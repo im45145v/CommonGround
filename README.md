@@ -5,7 +5,7 @@ station, complete short outdoor quests, and earn "Social Battery" credits via si
 companion is meant to spend as a voluntary recreational screen-time budget.
 
 > **Status: honest prototype.** The station (backend + mobile web app) is implemented and tested on a development
-> machine (24 automated tests). The Android companion (`android/`) is written and its core logic is unit-tested on the
+> machine (35 automated tests). The Android companion (`android/`) is written and its core logic is unit-tested on the
 > JVM, but the app has **not yet been built into an APK or run on a physical phone** (see [docs/ANDROID.md](docs/ANDROID.md)).
 > The web UI has not been tested on a real phone ([checklist](docs/PHONE_BROWSER_CHECKLIST.md)). On-device UNO Q
 > deployment, Gemma on real hardware and live ElevenLabs are out of scope so far — see [Known limitations](#known-limitations).
@@ -67,18 +67,19 @@ check RAM and latency first, and leave `CG_AI_ENABLED=false` if it is not reliab
 - Offline wallets can't know if a receipt was already redeemed on another phone until they sync; the station refuses a
   second redemption, and the app then doesn't credit it.
 - The quest timer proves elapsed time only; there is no proof of being outdoors (deliberately no location tracking).
-- Session tokens are bearer tokens stored in the browser; no rate limiting.
+- Session tokens are bearer tokens stored in the browser; they are stored hashed server-side, revocable, and do not expire. Pairing-code claims are rate limited per client IP.
 - Not tested on UNO Q hardware; Gemma local inference, LED matrix output and ElevenLabs were not exercised.
 - Talk Circle is polling-based, not real-time.
 - Credit farming with multiple anonymous sessions (including self-joined shared quests) is not prevented; the daily
-  limit is per pseudonym. Rate limiting or per-device limits are future work. `/api/receipts/redeem` is unauthenticated
-  (the signed receipt itself is the bearer credential).
+  limit is per pseudonym. Rate limiting or per-device limits are future work. Redemption requires the owner's token
+  and is atomic; receipts are owner/station/expiry-bound (see docs/ANDROID.md "Security model").
 
 ## API changes (milestone 2)
 - `GET /api/pair` now returns `public_key` (base64 X.509 DER, ECDSA P-256) and `key_algorithm`; `receipt_key` was removed.
 - New: `POST /api/pair/code` (authenticated, web app; one-time 6-digit code, 5 min), `POST /api/pair/claim`
   (`{code,label}` → device token, `user_id`, `public_key`), `GET /api/receipts` (device/web token; unredeemed receipts).
-- Receipt format: `base64url(JSON).base64url(DER ECDSA signature)`; payload `{v,id,user,amount,quest,iat}`.
+- Receipt format: `base64url(JSON).base64url(DER ECDSA signature)`; payload `{v:2,id,user,amount,quest,iat,aud,exp}` (`aud` = station id, `exp` = `CG_RECEIPT_TTL_DAYS`, default 30). v1 receipts are no longer accepted.
+- `POST /api/receipts/redeem` now **requires the owner's token** (403 for other users, 410 expired, 409 already redeemed). Pairing-code lockout is per client (5/min) with a global ceiling. New: `GET /api/devices`, `DELETE /api/devices/{id}`, `DELETE /api/devices/current`.
 - Rate limiting does not stop one person making several anonymous identities; that remains an open problem.
 
 ## Android and manual testing

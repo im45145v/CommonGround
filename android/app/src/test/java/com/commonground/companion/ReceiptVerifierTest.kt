@@ -8,12 +8,16 @@ import org.junit.Test
  * also proves Python-signed receipts verify on the JVM/Android crypto stack.
  */
 object Fixture {
-    const val PUBLIC_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6kGuEJ0iz84dMy2K4TOvhLo6w7JJm7O9l0da6q7UmWJE0dxQMBQzpgqfXVPV5+o40v7TR9eZ2OhQIs/DmRpQVg=="
-    const val GOOD = "eyJhbW91bnQiOjUsImlhdCI6MTcwMDAwMDAxMCwiaWQiOiJhYmMxMjMiLCJxdWVzdCI6MSwidXNlciI6InUxIiwidiI6MX0.MEUCIQDCyNIQHfdIoWCcl0SGVPbgbrlSEgIkSkxlwSUfqWSKOAIgZDwZdeKCsGJznJDomAwubbZ3MXRWWvEvo31BRdht3r0"
-    const val BAD_SIGNATURE = "eyJhbW91bnQiOjUsImlhdCI6MTcwMDAwMDAxMCwiaWQiOiJhYmMxMjMiLCJxdWVzdCI6MSwidXNlciI6InUxIiwidiI6MX0.MEUCIQDCyNIQHfdIoWCcl0SGVPbgbrlSEgIkSkxlwSUfqWSKOAIgZDwZdeKCsGJznJDomAwubbZ3MXRWWvEvo31BRdhAAAA"
-    const val BAD_PAYLOAD = "eyJhbW91bnQiOjUwMCwiaWF0IjoxNzAwMDAwMDEwLCJpZCI6ImFiYzEyMyIsInF1ZXN0IjoxLCJ1c2VyIjoidTEiLCJ2IjoxfQ.MEUCIQDCyNIQHfdIoWCcl0SGVPbgbrlSEgIkSkxlwSUfqWSKOAIgZDwZdeKCsGJznJDomAwubbZ3MXRWWvEvo31BRdht3r0"
+    const val PUBLIC_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjHLHBRbNFsw7HhXWkV03qhMqU/WBe02I9kE1jXrkri39tjV4CYo/YsDkG6u9xNjmV1ryBZ2TOc/RXWjgPaEJjw=="
+    const val STATION_ID = "fc04303435e7fe24"
+    const val GOOD = "eyJhbW91bnQiOjUsImF1ZCI6ImZjMDQzMDM0MzVlN2ZlMjQiLCJleHAiOjQxMDI0NDQ4MDAsImlhdCI6MTcwMDAwMDAxMCwiaWQiOiJhYmMxMjMiLCJxdWVzdCI6MSwidXNlciI6InUxIiwidiI6Mn0.MEYCIQCoNBPvkDZYZ9WrWMbMslWcdbpQetH33e79jCnM2213YAIhAKAQ9b8xrckbE5xBNHE9DRmohlyCZY335uWIUaSWcwQg"
+    const val BAD_SIGNATURE = "eyJhbW91bnQiOjUsImF1ZCI6ImZjMDQzMDM0MzVlN2ZlMjQiLCJleHAiOjQxMDI0NDQ4MDAsImlhdCI6MTcwMDAwMDAxMCwiaWQiOiJhYmMxMjMiLCJxdWVzdCI6MSwidXNlciI6InUxIiwidiI6Mn0.MEYCIQCoNBPvkDZYZ9WrWMbMslWcdbpQetH33e79jCnM2213YAIhAKAQ9b8xrckbE5xBNHE9DRmohlyCZY335uWIUaSWAAAA"
+    const val BAD_PAYLOAD = "eyJhbW91bnQiOjUwMCwiYXVkIjoiZmMwNDMwMzQzNWU3ZmUyNCIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDEwLCJpZCI6ImFiYzEyMyIsInF1ZXN0IjoxLCJ1c2VyIjoidTEiLCJ2IjoyfQ.MEYCIQCoNBPvkDZYZ9WrWMbMslWcdbpQetH33e79jCnM2213YAIhAKAQ9b8xrckbE5xBNHE9DRmohlyCZY335uWIUaSWcwQg"
+    const val EXPIRED = "eyJhbW91bnQiOjUsImF1ZCI6ImZjMDQzMDM0MzVlN2ZlMjQiLCJleHAiOjE3MDAwMDAxMDAsImlhdCI6MTcwMDAwMDAxMCwiaWQiOiJvbGQxIiwicXVlc3QiOjEsInVzZXIiOiJ1MSIsInYiOjJ9.MEUCIBRezSP4dSNtunBe5W6UhB28DHJKeEDtWQfRSoDJ81mZAiEAu-CihNmBVPKmPhyg-5cxNMlybrbv7oOOhzy9QdsIqPI"
+    const val WRONG_AUDIENCE = "eyJhbW91bnQiOjUsImF1ZCI6IjAxMjM0NTY3ODlhYmNkZWYiLCJleHAiOjQxMDI0NDQ4MDAsImlhdCI6MTcwMDAwMDAxMCwiaWQiOiJhdWQxIiwicXVlc3QiOjEsInVzZXIiOiJ1MSIsInYiOjJ9.MEQCIGU25-JS_xoTPtoGfJ8ntD1-ND7OV7sMcaECglURSfzCAiAS4aDcD7OipgENjBvQyEp5Ca4jY6R0h0g-o2YaLcmGLw"
+    const val LEGACY_V1 = "eyJhbW91bnQiOjUsImlhdCI6MTcwMDAwMDAxMCwiaWQiOiJ2MSIsInF1ZXN0IjoxLCJ1c2VyIjoidTEiLCJ2IjoxfQ.MEQCIDXQOaZqNE8JB9LmqCpPnWsjslESdMmtoRd022-V5_kBAiAktcYKk3cwZDUzldtOr1ZhIIliNzqcXopIXB-N37r5GQ"
     // Public key of a different station key pair
-    const val OTHER_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE5EUQ42Orp0j0Rs7Yo/RyCc3C/W75ueP1Qh45cAe7g0oVi/oAigVdicov+F5ssqB2XRJKyfmDIp4s8uiPuaqiNg=="
+    const val OTHER_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXR1zo+Qp0nYuy6n5oJRjVAkyTE+qTFTCYF+r1zRVjr3ApVJC9s0Inhn3eDCo/+GK4y36bqOCTuic1c98tXnorQ=="
 }
 
 class ReceiptVerifierTest {
@@ -28,5 +32,7 @@ class ReceiptVerifierTest {
         assertNull(ReceiptVerifier.verify(Fixture.PUBLIC_KEY, "a.b.c"))
         assertNull(ReceiptVerifier.verify("not-a-key", Fixture.GOOD))
     }
+    @Test fun stationIdMatchesStationImplementation() = assertEquals(Fixture.STATION_ID, ReceiptVerifier.stationId(Fixture.PUBLIC_KEY))
+    @Test fun legacyV1Rejected() = assertNull(ReceiptVerifier.verify(Fixture.PUBLIC_KEY, Fixture.LEGACY_V1))
     @Test fun wrongKeyRejected() = assertNull(ReceiptVerifier.verify(Fixture.OTHER_KEY, Fixture.GOOD))
 }

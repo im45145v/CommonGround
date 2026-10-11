@@ -19,8 +19,10 @@ data class AppInfo(val pkg: String, val label: String)
 object Usage {
     fun hasPermission(c: Context): Boolean {
         val ops = c.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        return ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.packageName) ==
-            AppOpsManager.MODE_ALLOWED
+        val mode = if (android.os.Build.VERSION.SDK_INT >= 29)
+            ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.packageName)
+        else @Suppress("DEPRECATION") ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.packageName)
+        return mode == AppOpsManager.MODE_ALLOWED
     }
 
     fun settingsIntent() = Intent(AndroidSettings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -33,7 +35,7 @@ object Usage {
     fun minutesToday(c: Context, packages: Set<String>): Int? {
         if (!hasPermission(c) || packages.isEmpty()) return if (hasPermission(c)) 0 else null
         val usm = c.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val stats = usm.queryAndAggregateUsageStats(startOfDay(), System.currentTimeMillis())
+        val stats = try { usm.queryAndAggregateUsageStats(startOfDay(), System.currentTimeMillis()) } catch (e: SecurityException) { return null }
         val ms = packages.sumOf { stats[it]?.totalTimeInForeground ?: 0L }
         return (ms / 60000).toInt()
     }
@@ -77,6 +79,5 @@ object Usage {
         return s
     }
 
-    private val protectedHints = listOf("dialer", "contacts", "emergency", "accessibility", "settings", "messaging", "sms", "mms", "phone")
-    fun isProtected(pkg: String, extra: Set<String>) = pkg in extra || protectedHints.any { pkg.contains(it, ignoreCase = true) }
+    fun isProtected(pkg: String, extra: Set<String>) = Protection.isProtected(pkg, extra)
 }

@@ -7,6 +7,9 @@
     <!-- Special access the user grants manually in Settings > Usage access. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Optional, user-granted: lets the soft gate appear over a selected app. Without it a notification is used. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
@@ -34,6 +37,10 @@
 
         <activity android:name=".GateActivity" android:exported="false"
             android:launchMode="singleTask" android:excludeFromRecents="true" />
+
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
 
         <service android:name=".MonitorService" android:exported="false"
             android:foregroundServiceType="specialUse">

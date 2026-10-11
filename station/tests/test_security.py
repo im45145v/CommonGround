@@ -104,7 +104,7 @@ def test_lockout_is_per_client_not_global_dos(client, clock):
         svc.claim_pair_code("000000", "x", client="attacker")
     assert e.value.status == 429
     # a legitimate client is unaffected
-    code = svc.create_pair_code({"id": "u"})["code"] if False else client.post("/api/pair/code", headers=h).json()["code"]
+    code = client.post("/api/pair/code", headers=h).json()["code"]
     assert svc.claim_pair_code(code, "phone", client="friend")["token"]
     # attacker's lockout ends after a minute
     clock.t += 61

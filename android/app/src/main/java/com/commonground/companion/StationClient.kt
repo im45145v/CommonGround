@@ -33,7 +33,10 @@ class StationClient(baseUrl: String) {
         val arr = call("GET", "/api/receipts", token = token).getJSONArray("receipts")
         return (0 until arr.length()).map { arr.getString(it) }
     }
-    fun redeem(receipt: String) = call("POST", "/api/receipts/redeem", JSONObject().put("receipt", receipt))
+    fun redeem(receipt: String, token: String) =
+        call("POST", "/api/receipts/redeem", JSONObject().put("receipt", receipt), token)
+    /** Best effort: tells the station to forget this device's token. */
+    fun revokeSelf(token: String) = call("DELETE", "/api/devices/current", token = token)
 
     companion object {
         fun normalize(url: String): String {
@@ -44,35 +47,31 @@ class StationClient(baseUrl: String) {
     }
 }
 
-/** Receipt synchronisation: verify signature -> redeem on station -> add to wallet. Offline-safe. */
+/**
+ * Receipt synchronisation. Each receipt is verified offline first and stored in the wallet (deduplicated by id)
+ * BEFORE it is redeemed, so a network failure can never lose a verified credit. Redemption tells the station
+ * the receipt has been used; HTTP 409 means it was already redeemed and is treated as done.
+ */
 object Sync {
-    data class Report(val added: Int, val rejected: Int, val redeemedPending: Int)
+    data class Report(val added: Int, val rejected: Int, val redeemed: Int)
 
     fun run(wallet: Wallet, client: StationClient): Report {
-        var added = 0; var rejected = 0; var pendingDone = 0
-        for ((id, token) in wallet.unsynced()) { // receipts added while the station was unreachable
-            try {
-                client.redeem(token)
-                wallet.markRedeemed(id); pendingDone++
-            } catch (e: StationException) {
-                if (e.status == 409) wallet.markRedeemed(id) else throw e
-            }
-        }
+        var added = 0; var rejected = 0; var redeemed = 0
         for (token in client.pendingReceipts(wallet.deviceToken)) {
-            val r = ReceiptVerifier.verify(wallet.publicKey, token)
-            if (r == null || (wallet.userId.isNotEmpty() && r.userId != wallet.userId)) { rejected++; continue }
-            if (wallet.has(r.id)) {
-                try { client.redeem(token) } catch (e: StationException) { if (e.status != 409) throw e }
-                wallet.markRedeemed(r.id); pendingDone++; continue
+            when (wallet.addReceipt(token)) {
+                AddResult.Added -> added++
+                AddResult.Duplicate -> {}
+                else -> rejected++
             }
-            try {
-                client.redeem(token)
-            } catch (e: StationException) {
-                if (e.status == 409) { rejected++; continue } // already redeemed elsewhere: do not credit twice
-                throw e
-            }
-            if (wallet.addReceipt(token, redeemed = true) == AddResult.Added) added++
         }
-        return Report(added, rejected, pendingDone)
+        for ((id, token) in wallet.unsynced()) {
+            try {
+                client.redeem(token, wallet.deviceToken)
+                wallet.markRedeemed(id); redeemed++
+            } catch (e: StationException) {
+                if (e.status == 409) wallet.markRedeemed(id) else if (e.status == 410) wallet.markRedeemed(id) else throw e
+            }
+        }
+        return Report(added, rejected, redeemed)
     }
 }

@@ -5,3 +5,4 @@ station/data/
 station/media/cache/*
 !station/media/cache/.gitkeep
 .venv/
+*.pem

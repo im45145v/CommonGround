@@ -35,7 +35,7 @@ class MonitorService : Service() {
         startForeground(1, Notification.Builder(this, CH).setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentTitle("CommonGround budget monitor is on")
             .setContentText("Watching selected recreational apps. Tap Stop to turn off.")
-            .addAction(Notification.Action.Builder(null, "Stop", stop).build()).setOngoing(true).build())
+            .addAction(@Suppress("DEPRECATION") Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stop).build()).setOngoing(true).build())
         job?.cancel()
         job = scope.launch { while (isActive) { try { tick() } catch (_: Exception) {}; delay(5000) } }
         return START_STICKY
@@ -44,11 +44,20 @@ class MonitorService : Service() {
     private fun tick() {
         val s = Settings(this)
         if (!s.gateEnabled) { stopSelf(); return }
-        if (s.overrideActive || !Usage.hasPermission(this)) return
-        val fg = Usage.foregroundApp(this) ?: return
-        if (fg !in s.selectedApps) return
+        if (!Usage.hasPermission(this)) { // permission revoked: switch enforcement off and say so; never fail silently
+            s.gateEnabled = false
+            getSystemService(NotificationManager::class.java).notify(3,
+                Notification.Builder(this, CH_GATE).setSmallIcon(android.R.drawable.ic_menu_compass)
+                    .setContentTitle("Budget monitor turned off")
+                    .setContentText("Usage access was revoked, so CommonGround can no longer measure app time.").build())
+            stopSelf(); return
+        }
+        if (s.overrideActive) return
+        val gateable = Protection.gateable(s.selectedApps, Usage.protectedPackages(this))
+        val fg = Usage.foregroundApp(this) ?: return // usage data unavailable -> do nothing
+        if (fg !in gateable) return
         val w = WalletHolder.get(this)
-        val used = Usage.minutesToday(this, s.selectedApps) ?: return
+        val used = Usage.minutesToday(this, gateable) ?: return
         val today = Settings.today()
         w.recordUsage(today, used)
         val st = Budget.compute(w.earnedMinutes, w.usedBefore(today), used, s.dailyCapMinutes)

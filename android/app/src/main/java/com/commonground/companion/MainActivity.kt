@@ -37,7 +37,7 @@ private val TABS = listOf("Battery", "Station", "Apps", "Budget")
 @Composable
 fun App(vm: MainViewModel) {
     var tab by remember { mutableIntStateOf(0) }
-    @Suppress("UNUSED_VARIABLE") val v = vm.version
+    val v = vm.version // passed to screens so they recompose when wallet/settings change
     Scaffold(
         topBar = { TopAppBar(title = { Text("CommonGround") }) },
         bottomBar = { NavigationBar { TABS.forEachIndexed { i, t ->
@@ -46,17 +46,17 @@ fun App(vm: MainViewModel) {
         Column(Modifier.padding(pad).padding(16.dp)) {
             if (vm.message.isNotEmpty()) { Text(vm.message, color = MaterialTheme.colorScheme.primary); Spacer(Modifier.height(8.dp)) }
             when (tab) {
-                0 -> BatteryScreen(vm)
-                1 -> StationScreen(vm)
-                2 -> AppsScreen(vm)
-                else -> BudgetScreen(vm)
+                0 -> BatteryScreen(vm, v)
+                1 -> StationScreen(vm, v)
+                2 -> AppsScreen(vm, v)
+                else -> BudgetScreen(vm, v)
             }
         }
     }
 }
 
 @Composable
-fun BatteryScreen(vm: MainViewModel) {
+fun BatteryScreen(vm: MainViewModel, @Suppress("UNUSED_PARAMETER") version: Int) {
     val w = vm.wallet
     val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
@@ -80,7 +80,7 @@ fun BatteryScreen(vm: MainViewModel) {
 }
 
 @Composable
-fun StationScreen(vm: MainViewModel) {
+fun StationScreen(vm: MainViewModel, @Suppress("UNUSED_PARAMETER") version: Int) {
     var url by remember { mutableStateOf(vm.wallet.stationUrl.ifEmpty { vm.settings.lastStationUrl }) }
     var code by remember { mutableStateOf("") }
     Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -92,13 +92,13 @@ fun StationScreen(vm: MainViewModel) {
         if (vm.wallet.isPaired) {
             Text("Paired: ${vm.wallet.stationName} (${vm.wallet.stationUrl})", modifier = Modifier.padding(top = 12.dp))
             Text("Receipts are verified on this phone using the station's public key (ECDSA P-256).")
-            OutlinedButton(onClick = { vm.wallet.unpair(); vm.refresh() }) { Text("Unpair (keeps earned minutes)") }
+            OutlinedButton(onClick = { vm.unpair() }) { Text("Unpair (keeps earned minutes)") }
         }
     }
 }
 
 @Composable
-fun AppsScreen(vm: MainViewModel) {
+fun AppsScreen(vm: MainViewModel, @Suppress("UNUSED_PARAMETER") version: Int) {
     LaunchedEffect(Unit) { vm.loadApps() }
     Text("Choose your recreational apps", style = MaterialTheme.typography.titleMedium)
     Text("Only these are counted. System, phone, messaging, emergency and accessibility apps are never listed.")
@@ -109,7 +109,7 @@ fun AppsScreen(vm: MainViewModel) {
 }
 
 @Composable
-fun BudgetScreen(vm: MainViewModel) {
+fun BudgetScreen(vm: MainViewModel, @Suppress("UNUSED_PARAMETER") version: Int) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val s = vm.settings
     Column(Modifier.verticalScroll(rememberScrollState())) {
