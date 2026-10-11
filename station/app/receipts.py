@@ -70,3 +70,12 @@ def verify(public_key, token: str):
         return payload if isinstance(payload, dict) else None
     except (InvalidSignature, ValueError, TypeError, KeyError):
         return None
+
+
+def station_id(key) -> str:
+    """Stable audience id of a station: first 16 hex chars of SHA-256 over its public key (SPKI DER).
+    Phones derive the same value from the public key they stored at pairing."""
+    import hashlib
+    pub = key.public_key() if hasattr(key, "public_key") else key
+    der = pub.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    return hashlib.sha256(der).hexdigest()[:16]

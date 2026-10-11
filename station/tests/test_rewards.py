@@ -86,8 +86,8 @@ def test_receipt_verify_and_single_redeem(client, clock):
     clock.t += 10
     token = client.post(f"/api/runs/{run['run_id']}/complete", headers=h).json()["receipt"]
     assert client.post("/api/receipts/verify", json={"receipt": token}).json()["valid"]
-    assert client.post("/api/receipts/redeem", json={"receipt": token}).status_code == 200
-    assert client.post("/api/receipts/redeem", json={"receipt": token}).status_code == 409
+    assert client.post("/api/receipts/redeem", json={"receipt": token}, headers=h).status_code == 200
+    assert client.post("/api/receipts/redeem", json={"receipt": token}, headers=h).status_code == 409
 
 
 def test_tampered_receipt_rejected(client, clock):

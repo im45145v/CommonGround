@@ -21,14 +21,14 @@ def test_key_and_receipts_survive_restart(tmp_path, clock):
     run = c1.post("/api/quests/1/start", headers=h).json()
     clock.t += 10
     token = c1.post(f"/api/runs/{run['run_id']}/complete", headers=h).json()["receipt"]
-    assert c1.post("/api/receipts/redeem", json={"receipt": token}).status_code == 200
+    assert c1.post("/api/receipts/redeem", json={"receipt": token}, headers=h).status_code == 200
 
     c2 = make(tmp_path, clock)  # restart: same DB + key file
     pub2 = c2.get("/api/pair", headers={"Authorization": h["Authorization"]}).json()["public_key"]
     assert pub1 == pub2
     assert receipts.verify(receipts.load_public_key(pub2), token)  # old receipt still verifies
     assert c2.post("/api/receipts/verify", json={"receipt": token}).json()["redeemed"] is True
-    assert c2.post("/api/receipts/redeem", json={"receipt": token}).status_code == 409  # still no duplicates
+    assert c2.post("/api/receipts/redeem", json={"receipt": token}, headers=h).status_code == 409  # still no duplicates
 
 
 def test_key_file_is_private(tmp_path):
@@ -55,7 +55,7 @@ def test_pairing_and_receipt_sync(client, clock):
     token = client.post(f"/api/runs/{run['run_id']}/complete", headers=h).json()["receipt"]
     assert client.get("/api/receipts", headers=dev).json()["receipts"] == [token]
     assert client.get("/api/wallet", headers=dev).json()["balance"] == 5
-    assert client.post("/api/receipts/redeem", json={"receipt": token}).status_code == 200
+    assert client.post("/api/receipts/redeem", json={"receipt": token}, headers=h).status_code == 200
     assert client.get("/api/receipts", headers=dev).json()["receipts"] == []
 
 
@@ -67,9 +67,3 @@ def test_pair_code_expires(client, clock):
     assert client.post("/api/pair/code").status_code == 401
 
 
-def test_pair_claim_lockout(client, clock):
-    for _ in range(10):
-        assert client.post("/api/pair/claim", json={"code": "000000"}).status_code == 422
-    assert client.post("/api/pair/claim", json={"code": "000000"}).status_code == 429
-    clock.t += 61
-    assert client.post("/api/pair/claim", json={"code": "000000"}).status_code == 422

@@ -34,7 +34,7 @@ class Services:
         self.db, self.settings, self.now = db, settings, clock
         self._pair_lock = threading.Lock()
         self._pair_codes: dict[str, tuple[str, float]] = {}
-        self._claim_fails: list[float] = []
+        self._claim_fails: list[tuple[float, str]] = []
         if not db.one("SELECT 1 FROM quests LIMIT 1"):
             for t, d, r in SEED_QUESTS:
                 db.execute("INSERT INTO quests(title,description,reward) VALUES (?,?,?)", (t, d, r))
@@ -64,7 +64,9 @@ class Services:
                 self.db.one("SELECT u.* FROM users u JOIN device_tokens d ON d.user_id=u.id WHERE d.token_hash=?", (h,)))
 
     PAIR_TTL = 300
-    CLAIM_MAX_FAILS, CLAIM_WINDOW = 10, 60
+    # Brute-force protection for the 6-digit code: a per-client lockout (so one noisy client cannot lock out
+    # everybody else) plus a much higher global ceiling as a backstop against distributed guessing.
+    CLAIM_CLIENT_MAX, CLAIM_GLOBAL_MAX, CLAIM_WINDOW = 5, 300, 600
 
     def create_pair_code(self, user):
         """Short-lived single-use code shown in the web app and typed into the Android app."""
@@ -77,16 +79,16 @@ class Services:
             self._pair_codes[code] = (user["id"], now + self.PAIR_TTL)
         return {"code": code, "expires_in": self.PAIR_TTL}
 
-    def claim_pair_code(self, code: str, label: str):
+    def claim_pair_code(self, code: str, label: str, client: str = ""):
         now = self.now()
         with self._pair_lock:
-            # Global lockout (not per-client) to make guessing 6-digit codes impractical on a shared LAN.
-            self._claim_fails = [t for t in self._claim_fails if t > now - self.CLAIM_WINDOW]
-            if len(self._claim_fails) >= self.CLAIM_MAX_FAILS:
+            self._claim_fails = [(t, c) for t, c in self._claim_fails if t > now - self.CLAIM_WINDOW]
+            mine = sum(1 for t, c in self._claim_fails if c == client and t > now - 60)
+            if mine >= self.CLAIM_CLIENT_MAX or len(self._claim_fails) >= self.CLAIM_GLOBAL_MAX:
                 raise ServiceError(429, "too many failed pairing attempts, wait a minute")
-            entry = self._pair_codes.pop((code or "").strip(), None)
+            entry = self._pair_codes.pop((code or "").strip(), None)  # pop under lock => strictly single use
             if not entry or entry[1] < now:
-                self._claim_fails.append(now)
+                self._claim_fails.append((now, client))
                 raise ServiceError(422, "invalid or expired pairing code")
         token = secrets.token_urlsafe(24)
         self.db.execute("INSERT INTO device_tokens VALUES (?,?,?,?)",
@@ -94,9 +96,24 @@ class Services:
         user = self.db.one("SELECT * FROM users WHERE id=?", (entry[0],))
         return {"token": token, "user_id": user["id"], "nickname": user["nickname"]}
 
+    # ---- device tokens ----------------------------------------------------
+    def list_devices(self, user_id: str):
+        return [{"id": r["token_hash"][:12], "label": r["label"], "created_at": r["created_at"]}
+                for r in self.db.query("SELECT token_hash,label,created_at FROM device_tokens WHERE user_id=? ORDER BY created_at", (user_id,))]
+
+    def revoke_device(self, user_id: str, device_id: str | None = None, token: str | None = None):
+        """Revoke by short id, or the device identified by its own token. Only the owner's devices."""
+        if token is not None:
+            cur = self.db.execute("DELETE FROM device_tokens WHERE token_hash=? AND user_id=?", (self._hash(token), user_id))
+        else:
+            cur = self.db.execute("DELETE FROM device_tokens WHERE user_id=? AND substr(token_hash,1,12)=?", (user_id, device_id or ""))
+        if cur.rowcount == 0:
+            raise ServiceError(404, "device not found")
+
     def pending_receipts(self, user_id: str):
         rows = self.db.query("SELECT token FROM receipts WHERE user_id=? AND redeemed_at IS NULL AND token IS NOT NULL "
-                             "ORDER BY issued_at", (user_id,))
+                             "AND issued_at > ? ORDER BY issued_at",
+                             (user_id, int(self.now()) - self.settings.receipt_ttl_days * 86400))
         return [r["token"] for r in rows]
 
     # ---- quests ----------------------------------------------------------
@@ -164,7 +181,8 @@ class Services:
             rid = uuid.uuid4().hex
             self.db.execute("INSERT INTO receipts(id,ledger_id,user_id,amount,issued_at) VALUES (?,?,?,?,?)",
                             (rid, cur.lastrowid, user["id"], granted, int(now)))
-            payload = {"v": 1, "id": rid, "user": user["id"], "amount": granted, "quest": quest["id"], "iat": int(now)}
+            payload = {"v": 2, "id": rid, "user": user["id"], "amount": granted, "quest": quest["id"], "iat": int(now),
+                       "aud": receipts.station_id(self.key), "exp": int(now) + self.settings.receipt_ttl_days * 86400}
             result["receipt"] = receipts.sign(self.key, payload)
             self.db.execute("UPDATE receipts SET token=? WHERE id=?", (result["receipt"], rid))
             return result
@@ -182,17 +200,26 @@ class Services:
             "SELECT id,amount,kind,note,created_at FROM ledger WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,))]
         return {"balance": bal, "daily_remaining": self.daily_remaining(user_id), "history": hist}
 
-    def verify_receipt(self, token: str, redeem: bool = False):
+    def verify_receipt(self, token: str, redeem: bool = False, caller_id: str | None = None):
+        """Check signature, audience (this station) and expiry. Redeeming additionally requires that the caller
+        owns the receipt, and is a single atomic UPDATE so concurrent requests cannot both succeed."""
         payload = receipts.verify(self.key, token)
         if not payload:
             raise ServiceError(422, "invalid receipt signature")
+        if payload.get("v") != 2 or payload.get("aud") != receipts.station_id(self.key):
+            raise ServiceError(422, "receipt was not issued by this station")
         row = self.db.one("SELECT * FROM receipts WHERE id=?", (payload.get("id"),))
         if not row or row["amount"] != payload.get("amount") or row["user_id"] != payload.get("user"):
             raise ServiceError(422, "unknown receipt")
         if redeem:
+            if caller_id != row["user_id"]:
+                raise ServiceError(403, "receipt belongs to a different participant")
+            if payload.get("exp", 0) < self.now():
+                raise ServiceError(410, "receipt expired")
             cur = self.db.execute("UPDATE receipts SET redeemed_at=? WHERE id=? AND redeemed_at IS NULL",
                                   (int(self.now()), row["id"]))
             if cur.rowcount == 0:
                 raise ServiceError(409, "receipt already redeemed")
             return {"valid": True, "id": row["id"], "amount": row["amount"], "redeemed": True}
-        return {"valid": True, "id": row["id"], "amount": row["amount"], "redeemed": row["redeemed_at"] is not None}
+        return {"valid": True, "id": row["id"], "amount": row["amount"], "redeemed": row["redeemed_at"] is not None,
+                "expired": payload.get("exp", 0) < self.now()}

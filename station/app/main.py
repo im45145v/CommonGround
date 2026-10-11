@@ -4,7 +4,7 @@ import logging
 import urllib.request
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -100,11 +100,26 @@ def create_app(settings: Settings | None = None, provider=None, clock=None) -> F
         return svc.create_pair_code(user)
 
     @app.post("/api/pair/claim")
-    def pair_claim(body: ClaimIn):
+    def pair_claim(body: ClaimIn, request: Request):
         """Android app exchanges the code for its own device token plus the PUBLIC receipt key."""
-        out = svc.claim_pair_code(body.code, body.label)
+        out = svc.claim_pair_code(body.code, body.label, request.client.host if request.client else "")
         return out | {"station": settings.station_name, "public_key": svc.public_key,
                       "key_algorithm": "ECDSA-P256-SHA256"}
+
+    @app.get("/api/devices")
+    def devices(user=Depends(current_user)):
+        return svc.list_devices(user["id"])
+
+    @app.delete("/api/devices/current")
+    def revoke_current(authorization: str = Header(default=""), user=Depends(current_user)):
+        """A paired phone revokes its own device token (used by 'Unpair')."""
+        svc.revoke_device(user["id"], token=authorization.removeprefix("Bearer ").strip())
+        return {"revoked": True}
+
+    @app.delete("/api/devices/{device_id}")
+    def revoke_device(device_id: str, user=Depends(current_user)):
+        svc.revoke_device(user["id"], device_id=device_id)
+        return {"revoked": True}
 
     @app.get("/api/receipts")
     def my_receipts(user=Depends(current_user)):
@@ -138,8 +153,8 @@ def create_app(settings: Settings | None = None, provider=None, clock=None) -> F
         return svc.verify_receipt(body.receipt)
 
     @app.post("/api/receipts/redeem")
-    def redeem(body: ReceiptIn):
-        return svc.verify_receipt(body.receipt, redeem=True)
+    def redeem(body: ReceiptIn, user=Depends(current_user)):
+        return svc.verify_receipt(body.receipt, redeem=True, caller_id=user["id"])
 
     # ---- AI --------------------------------------------------------------
     @app.post("/api/ai/quest")
