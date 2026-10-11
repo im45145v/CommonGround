@@ -54,7 +54,9 @@ def test_library(client):
 def test_pairing_returns_key(client):
     h, u = join(client)
     j = client.get("/api/pair", headers=h).json()
-    assert j["receipt_key"] == "test-secret" and j["user_id"] == u["user_id"]
+    assert j["user_id"] == u["user_id"] and j["key_algorithm"] == "ECDSA-P256-SHA256"
+    assert "receipt_key" not in j and "BEGIN" not in str(j) and "PRIVATE" not in str(j)
+    assert j["public_key"] == client.app.state.svc.public_key
 
 
 def test_trivia_multiplayer(client):

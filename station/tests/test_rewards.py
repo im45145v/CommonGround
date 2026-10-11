@@ -28,7 +28,7 @@ def test_quest_completion_and_receipt(client, clock):
     clock.t += 10
     done = client.post(f"/api/runs/{run['run_id']}/complete", headers=h).json()
     assert done["credits"] == 5
-    payload = receipts.verify("test-secret", done["receipt"])
+    payload = receipts.verify(client.app.state.svc.key, done["receipt"])
     assert payload["amount"] == 5 and payload["user"] == u["user_id"]
     w = client.get("/api/wallet", headers=h).json()
     assert w["balance"] == 5 and w["history"][0]["amount"] == 5
@@ -90,16 +90,32 @@ def test_receipt_verify_and_single_redeem(client, clock):
     assert client.post("/api/receipts/redeem", json={"receipt": token}).status_code == 409
 
 
-def test_tampered_receipt_rejected(client):
-    forged = receipts.sign("wrong-key", {"id": "x", "user": "u", "amount": 999})
+def test_tampered_receipt_rejected(client, clock):
+    from cryptography.hazmat.primitives.asymmetric import ec
+    forged = receipts.sign(ec.generate_private_key(ec.SECP256R1()), {"id": "x", "user": "u", "amount": 999})
     assert client.post("/api/receipts/verify", json={"receipt": forged}).status_code == 422
-    valid_sig_unknown = receipts.sign("test-secret", {"id": "x", "user": "u", "amount": 999})
+    valid_sig_unknown = receipts.sign(client.app.state.svc.key, {"id": "x", "user": "u", "amount": 999})
     assert client.post("/api/receipts/verify", json={"receipt": valid_sig_unknown}).status_code == 422
     assert client.post("/api/receipts/verify", json={"receipt": "garbage"}).status_code == 422
+    # modified payload with original signature
+    h, _ = join(client)
+    run = run_quest(client, clock, h)
+    clock.t += 10
+    token = client.post(f"/api/runs/{run['run_id']}/complete", headers=h).json()["receipt"]
+    head, sig = token.split(".")
+    payload = receipts.verify(client.app.state.svc.key, token)
+    payload["amount"] = 500
+    bumped = receipts.sign(client.app.state.svc.key, payload).split(".")[0]
+    assert client.post("/api/receipts/verify", json={"receipt": bumped + "." + sig}).status_code == 422
 
 
 def test_receipt_roundtrip_unit():
-    t = receipts.sign("k", {"a": 1})
-    assert receipts.verify("k", t) == {"a": 1}
+    from cryptography.hazmat.primitives.asymmetric import ec
+    k = ec.generate_private_key(ec.SECP256R1())
+    t = receipts.sign(k, {"a": 1})
+    assert receipts.verify(k.public_key(), t) == {"a": 1}
     head, sig = t.split(".")
-    assert receipts.verify("k", head + "." + sig[:-2] + "AA") is None
+    assert receipts.verify(k.public_key(), head + "." + sig[:-4] + "AAAA") is None
+    assert receipts.verify(ec.generate_private_key(ec.SECP256R1()).public_key(), t) is None
+    # public key as exported for phones round-trips
+    assert receipts.verify(receipts.load_public_key(receipts.public_key_b64(k)), t) == {"a": 1}

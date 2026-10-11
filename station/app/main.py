@@ -85,8 +85,9 @@ def create_app(settings: Settings | None = None, provider=None, clock=None) -> F
 
     @app.get("/api/pair")
     def pair(user=Depends(current_user)):
-        """Gives the Android companion what it needs to verify receipts offline."""
-        return {"station": settings.station_name, "receipt_key": svc.secret, "user_id": user["id"]}
+        """Gives the Android companion the PUBLIC key (never the private key) to verify receipts offline."""
+        return {"station": settings.station_name, "public_key": svc.public_key,
+                "key_algorithm": "ECDSA-P256-SHA256", "user_id": user["id"]}
 
     # ---- quests / wallet -------------------------------------------------
     @app.get("/api/quests")

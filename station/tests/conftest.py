@@ -36,7 +36,7 @@ def clock():
 def make_client(tmp_path, clock):
     def _make(provider=None, **kw):
         s = Settings(db_path=":memory:", media_dir=str(Path(__file__).resolve().parent.parent / "media"),
-                     secret="test-secret", demo_mode=True, demo_quest_seconds=10, daily_limit=20,
+                     demo_mode=True, demo_quest_seconds=10, daily_limit=20,
                      shared_bonus=2, ai_enabled=False, trivia_seconds=1, **kw)
         return TestClient(create_app(s, provider=provider, clock=clock))
     return _make

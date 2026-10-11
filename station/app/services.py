@@ -3,6 +3,7 @@ import hashlib
 import secrets
 import time
 import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 
 from . import receipts
@@ -33,14 +34,12 @@ class Services:
         if not db.one("SELECT 1 FROM quests LIMIT 1"):
             for t, d, r in SEED_QUESTS:
                 db.execute("INSERT INTO quests(title,description,reward) VALUES (?,?,?)", (t, d, r))
-        if settings.secret:
-            self.secret = settings.secret
-        else:
-            row = db.one("SELECT value FROM meta WHERE key='secret'")
-            if not row:
-                db.execute("INSERT INTO meta VALUES ('secret', ?)", (secrets.token_hex(32),))
-                row = db.one("SELECT value FROM meta WHERE key='secret'")
-            self.secret = row["value"]
+        key_path = settings.key_path or (None if settings.db_path == ":memory:" else str(Path(settings.db_path).parent / "receipt_key.pem"))
+        self.key = receipts.load_or_create_key(key_path)
+
+    @property
+    def public_key(self) -> str:
+        return receipts.public_key_b64(self.key)
 
     # ---- users -----------------------------------------------------------
     @staticmethod
@@ -124,7 +123,7 @@ class Services:
             self.db.execute("INSERT INTO receipts(id,ledger_id,user_id,amount,issued_at) VALUES (?,?,?,?,?)",
                             (rid, cur.lastrowid, user["id"], granted, int(now)))
             payload = {"v": 1, "id": rid, "user": user["id"], "amount": granted, "quest": quest["id"], "iat": int(now)}
-            result["receipt"] = receipts.sign(self.secret, payload)
+            result["receipt"] = receipts.sign(self.key, payload)
             return result
 
     def daily_remaining(self, user_id: str, now: float | None = None) -> int:
@@ -141,7 +140,7 @@ class Services:
         return {"balance": bal, "daily_remaining": self.daily_remaining(user_id), "history": hist}
 
     def verify_receipt(self, token: str, redeem: bool = False):
-        payload = receipts.verify(self.secret, token)
+        payload = receipts.verify(self.key, token)
         if not payload:
             raise ServiceError(422, "invalid receipt signature")
         row = self.db.one("SELECT * FROM receipts WHERE id=?", (payload.get("id"),))

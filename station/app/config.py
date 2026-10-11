@@ -15,8 +15,8 @@ class Settings:
     db_path: str = field(default_factory=lambda: os.environ.get("CG_DB_PATH", str(BASE / "data" / "station.db")))
     media_dir: str = field(default_factory=lambda: os.environ.get("CG_MEDIA_DIR", str(BASE / "media")))
     station_name: str = field(default_factory=lambda: os.environ.get("CG_STATION_NAME", "Garden Bench #1"))
-    # Signing key for receipts. If empty a random key is generated and kept in the DB.
-    secret: str = field(default_factory=lambda: os.environ.get("CG_SECRET", ""))
+    # ECDSA P-256 private key (PEM) for signing receipts; default: receipt_key.pem next to the DB.
+    key_path: str = field(default_factory=lambda: os.environ.get("CG_KEY_PATH", ""))
     demo_mode: bool = field(default_factory=lambda: _bool("CG_DEMO_MODE", True))
     demo_quest_seconds: int = field(default_factory=lambda: int(os.environ.get("CG_DEMO_QUEST_SECONDS", "10")))
     quest_seconds: int = field(default_factory=lambda: int(os.environ.get("CG_QUEST_SECONDS", "600")))
